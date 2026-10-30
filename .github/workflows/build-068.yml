@@ -1,0 +1,144 @@
+name: OpenGothic 0.6.8 Direct Folder
+
+on:
+  push:
+    branches: [main]
+    paths: ['overlay068/**', '.github/workflows/build-068.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: opengothic-068-directfolder
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  OPENGOTHIC_COMMIT: "98e8ef73993fe0700fabdbb898c4504a090d7860"
+
+jobs:
+  android-arm64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout overlays
+        uses: actions/checkout@v6
+
+      - name: Clone exact 0.6.8
+        shell: bash
+        run: |
+          git clone https://github.com/Solessfir/OpenGothic.git src
+          cd src
+          git checkout "$OPENGOTHIC_COMMIT"
+          git submodule update --init --recursive
+          test "$(git rev-parse HEAD)" = "$OPENGOTHIC_COMMIT"
+
+      - name: Apply self-contained 0.6.8 Direct Folder overlays
+        shell: bash
+        run: |
+          cp overlay068/AndroidManifest.xml src/android/launcher/AndroidManifest.xml
+          cp overlay068/LauncherActivity.java src/android/launcher/java/org/opengothic/app/LauncherActivity.java
+          cp overlay068/strings-en.xml src/android/launcher/res/values/og_strings.xml
+          cp overlay068/strings-ru.xml src/android/launcher/res/values-ru/og_strings.xml
+          cp overlay068/installdetect.h src/common/utils/installdetect.h
+          cp overlay068/installdetect.cpp src/common/utils/installdetect.cpp
+          grep -q 'MANAGE_EXTERNAL_STORAGE' src/android/launcher/AndroidManifest.xml
+          grep -q 'PICK_GAME_FOLDER = 9' src/android/launcher/java/org/opengothic/app/LauncherActivity.java
+          grep -q 'game-path.txt' src/common/utils/installdetect.cpp
+          grep -q 'og_select_folder' src/android/launcher/res/values-ru/og_strings.xml
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: '8.9'
+
+      - name: Install Vulkan and Android tooling
+        shell: bash
+        run: |
+          git clone --depth 1 --branch vulkan-sdk-1.4.357.0 https://github.com/KhronosGroup/Vulkan-Headers.git Vulkan-Headers
+          mkdir -p VulkanSDK/include
+          cp -a Vulkan-Headers/include/. VulkanSDK/include/
+          echo "VULKAN_SDK=$GITHUB_WORKSPACE/VulkanSDK" >> "$GITHUB_ENV"
+          sudo apt-get update
+          sudo apt-get install -y glslang-tools ninja-build
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" "build-tools;35.0.0" \
+            "ndk;27.0.12077973" "cmake;3.22.1"
+
+      - name: Stamp build version
+        run: |
+          printf '%s\n' '#pragma once' 'static const char* appBuild = "OpenGothic 0.6.8 DIRECT FOLDER";' > src/game/build.h
+
+      - name: Configure Android ARM64 launcher
+        shell: bash
+        run: |
+          GRADLE="$RUNNER_TEMP/.gradle-actions/gradle-installations/installs/gradle-8.9/bin/gradle"
+          "$ANDROID_HOME/cmake/3.22.1/bin/cmake" -S src -B src/build/android -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk/27.0.12077973/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_STL=c++_shared -DCMAKE_ANDROID_STL_TYPE=c++_shared \
+            -DANDROID_PLATFORM=android-24 -DCMAKE_BUILD_TYPE=Release \
+            -DOPENGOTHIC_ANDROID_GAME=launcher -DTEMPEST_ANDROID_GRADLE_EXECUTABLE="$GRADLE"
+
+      - name: Build APK
+        run: |
+          "$ANDROID_HOME/cmake/3.22.1/bin/cmake" --build src/build/android --target OpenGothic-apk -- -j2
+
+      - name: Sign and validate APK
+        shell: bash
+        run: |
+          APK=""
+          while IFS= read -r candidate; do
+            if "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$candidate" 2>/dev/null | grep -q "package: name='org.opengothic.launcher'"; then
+              APK="$candidate"
+              break
+            fi
+          done < <(find src/build/android -path '*/build/outputs/apk/*/*.apk' -type f | sort)
+          test -n "$APK"
+          OUT="GothicLauncher-arm64-OpenGothic068-DIRECT.apk"
+          # Independent test signer; do not copy the old project's private signing key.
+          keytool -genkeypair -keystore gothic_fix2.keystore -storetype PKCS12 \
+            -storepass android -keypass android -alias gothicfix2 \
+            -keyalg RSA -keysize 3072 -validity 3650 \
+            -dname "CN=OpenGothic Direct Folder Test, OU=Android, O=Personal Build, C=KZ" -noprompt
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -p 4 "$APK" aligned-unsigned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks gothic_fix2.keystore --ks-key-alias gothicfix2 \
+            --ks-pass pass:android --key-pass pass:android --out "$OUT" aligned-unsigned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$OUT" | tee apk-signature.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$OUT" | tee apk-badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$OUT" | tee apk-permissions.txt
+          grep -q "versionName='0.6.8'" apk-badging.txt
+          grep -q 'MANAGE_EXTERNAL_STORAGE' apk-permissions.txt
+          unzip -l "$OUT" | tee apk-files.txt
+          grep -q 'lib/arm64-v8a/libopengothic.so' apk-files.txt
+          sha256sum "$OUT" | tee apk-sha256.txt
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenGothic-068-DirectFolder
+          path: |
+            GothicLauncher-arm64-OpenGothic068-DIRECT.apk
+            apk-sha256.txt
+            apk-signature.txt
+            apk-badging.txt
+            apk-permissions.txt
+          retention-days: 30
+
+      - name: Publish tagged release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete exact-068-directfolder --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create exact-068-directfolder \
+            GothicLauncher-arm64-OpenGothic068-DIRECT.apk \
+            apk-sha256.txt apk-badging.txt apk-permissions.txt apk-signature.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "OpenGothic 0.6.8 - Direct Folder" \
+            --notes "0.6.8 engine and launcher; select existing game folder without ZIP import or copying. Separate saves. Prior FIX36 graphics modifications are not included. Signed with a fresh test key; updates over other signed APKs may require uninstall. Untested on device." \
+            --prerelease
