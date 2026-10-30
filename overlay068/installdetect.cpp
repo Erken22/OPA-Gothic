@@ -118,7 +118,7 @@ std::u16string InstallDetect::androidGamePath() {
   while(!path.empty() && std::isspace(uint8_t(path.back())))
     path.pop_back();
   if(path.empty()) return u"";
-  auto game = std::filesystem::u8path(path);
+  auto game = std::filesystem::path(path);
   if(!game.is_absolute()) return u"";
   std::error_code ec;
   game = std::filesystem::weakly_canonical(game,ec);
