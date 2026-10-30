@@ -40,12 +40,16 @@ jobs:
           cp overlay068/LauncherActivity.java src/android/launcher/java/org/opengothic/app/LauncherActivity.java
           cp overlay068/strings-en.xml src/android/launcher/res/values/og_strings.xml
           cp overlay068/strings-ru.xml src/android/launcher/res/values-ru/og_strings.xml
+          cp overlay068/strings-de.xml src/android/launcher/res/values-de/og_strings.xml
+          cp overlay068/strings-pl.xml src/android/launcher/res/values-pl/og_strings.xml
           cp overlay068/installdetect.h src/common/utils/installdetect.h
           cp overlay068/installdetect.cpp src/common/utils/installdetect.cpp
           grep -q 'MANAGE_EXTERNAL_STORAGE' src/android/launcher/AndroidManifest.xml
           grep -q 'PICK_GAME_FOLDER = 9' src/android/launcher/java/org/opengothic/app/LauncherActivity.java
           grep -q 'game-path.txt' src/common/utils/installdetect.cpp
           grep -q 'og_select_folder' src/android/launcher/res/values-ru/og_strings.xml
+          grep -q 'og_select_folder' src/android/launcher/res/values-de/og_strings.xml
+          grep -q 'og_select_folder' src/android/launcher/res/values-pl/og_strings.xml
 
       - uses: actions/setup-java@v5
         with:
