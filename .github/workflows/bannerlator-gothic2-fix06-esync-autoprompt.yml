@@ -368,61 +368,53 @@ jobs:
         from pathlib import Path
         p=Path("app/src/main/java/com/winlator/star/XServerDisplayActivity.java")
         s=p.read_text(encoding="utf-8")
-        old='''            com.winlator.star.core.EnvVars rootOptions =
-                            new com.winlator.star.core.EnvVars(container.getEnvVars());
-                    if (shortcut != null) rootOptions.putAll(shortcut.getExtra("envVars", ""));
-                    if (r[2] >= 0 && r[2] < 65536 &&
-                            "1".equals(rootOptions.get("BANNER_ESYNC_ROOT_NOFILE"))) {'''
-        new='''            com.winlator.star.core.EnvVars rootOptions =
-                            new com.winlator.star.core.EnvVars(container.getEnvVars());
-                    if (shortcut != null) rootOptions.putAll(shortcut.getExtra("envVars", ""));
-                    // FIX06: auto-offer Magisk permission ONLY for Gothic II with Esync and
-                    // an insufficient kernel limit. User can deny Magisk, or set
-                    // BANNER_ESYNC_ROOT_NOFILE=0 to suppress the prompt for this game.
-                    boolean gothicTarget = com.winlator.star.core.Gothic2WineCompat.isGothic2(
-                            shortcut != null ? shortcut.path : null);
-                    boolean rootOptOut = "0".equals(rootOptions.get("BANNER_ESYNC_ROOT_NOFILE"));
-                    String rootResult = gothicTarget ? "not needed or opted out" : "non-Gothic";
-                    if (r[2] >= 0 && r[2] < 65536 && gothicTarget && !rootOptOut) {
-                        rootResult = "root request started";'''
-        if s.count(old)!=1:raise SystemExit("FIX06 root condition not found")
-        s=s.replace(old,new,1)
-        old='''            if (!exe.isFile()) {
-                        android.util.Log.e("Gothic2Esync", "Missing root helper: " + helper);
-                    } else {'''
-        new='''            if (!exe.isFile()) {
-                        rootResult = "helper missing: " + helper;
-                        android.util.Log.e("Gothic2Esync", rootResult);
-                    } else {'''
-        if s.count(old)!=1:raise SystemExit("FIX06 missing helper anchor")
-        s=s.replace(old,new,1)
-        old='''                android.util.Log.i("Gothic2Esync", "root helper: completed=" +
-                                completed + " exit=" + (completed ? su.exitValue() : -1) +
-                                " output=" + rootOutput);'''
-        new='''                rootResult = "completed=" + completed + " exit=" +
-                                (completed ? su.exitValue() : -1) + " output=" + rootOutput;
-                        android.util.Log.i("Gothic2Esync", "root helper: " + rootResult);'''
-        if s.count(old)!=1:raise SystemExit("FIX06 root status anchor missing")
-        s=s.replace(old,new,1)
-        old='''            android.util.Log.w("Gothic2Esync", "Optional root helper failed", rootError);'''
-        new='''            rootResult = "error=" + rootError.getClass().getSimpleName() + ": " +
-                            String.valueOf(rootError.getMessage());
-                    android.util.Log.w("Gothic2Esync", "Optional root helper failed", rootError);'''
-        if s.count(old)!=1:raise SystemExit("FIX06 root exception anchor missing")
-        s=s.replace(old,new,1)
-        old='''        esyncNoFileReport = com.winlator.star.core.EsyncFdLimit.describe(r);'''
-        new='''        esyncNoFileReport = com.winlator.star.core.EsyncFdLimit.describe(r) +
-                        " | root=" + rootResult;'''
-        if s.count(old)!=1:raise SystemExit("FIX06 root report anchor missing")
-        s=s.replace(old,new,1)
+        def swap_once(old,new):
+            global s
+            count=s.count(old)
+            if count!=1:raise SystemExit(f"FIX06 source changed: {old[:100]} ({count})")
+            s=s.replace(old,new,1)
+        swap_once(
+            'if (shortcut != null) rootOptions.putAll(shortcut.getExtra("envVars", ""));',
+            '''if (shortcut != null) rootOptions.putAll(shortcut.getExtra("envVars", ""));
+                            // Magisk will ask for user authorization on this Gothic II Esync launch.
+                            // Explicit BANNER_ESYNC_ROOT_NOFILE=0 suppresses the prompt.
+                            boolean gothicTarget = com.winlator.star.core.Gothic2WineCompat.isGothic2(
+                                    shortcut != null ? shortcut.path : null);
+                            boolean rootOptOut = "0".equals(rootOptions.get("BANNER_ESYNC_ROOT_NOFILE"));
+                            String rootResult = gothicTarget ? "not needed or opted out" : "non-Gothic";'''
+        )
+        swap_once(
+            '"1".equals(rootOptions.get("BANNER_ESYNC_ROOT_NOFILE")))',
+            'gothicTarget && !rootOptOut)'
+        )
+        swap_once(
+            'android.util.Log.e("Gothic2Esync", "Missing root helper: " + helper);',
+            '''rootResult = "missing helper: " + helper;
+                                        android.util.Log.e("Gothic2Esync", rootResult);'''
+        )
+        swap_once(
+            'android.util.Log.i("Gothic2Esync", "root helper: completed=" +',
+            '''rootResult = "completed=" + completed + " exit=" +
+                                                (completed ? su.exitValue() : -1) + " output=" + rootOutput;
+                                        android.util.Log.i("Gothic2Esync", "root helper: completed=" +'''
+        )
+        swap_once(
+            'android.util.Log.w("Gothic2Esync", "Optional root helper failed", rootError);',
+            '''rootResult = "exception=" + rootError.getClass().getSimpleName() + ": " +
+                                            String.valueOf(rootError.getMessage());
+                                    android.util.Log.w("Gothic2Esync", "Optional root helper failed", rootError);'''
+        )
+        swap_once(
+            'esyncNoFileReport = com.winlator.star.core.EsyncFdLimit.describe(r);',
+            'esyncNoFileReport = com.winlator.star.core.EsyncFdLimit.describe(r) + " | root=" + rootResult;'
+        )
         p.write_text(s,encoding="utf-8")
-        assert "gothicTarget && !rootOptOut" in s
-        print("FIX06 auto-permission, per-game opt-out, detailed Wine debug applied")
+        assert 'gothicTarget && !rootOptOut)' in s
+        print("FIX06 Gothic II Esync root status and Magisk prompt hooks applied")
         
         PY
-        grep -Fq 'rootResult = "completed="' app/src/main/java/com/winlator/star/XServerDisplayActivity.java
-        grep -Fq 'gothicTarget && !rootOptOut' app/src/main/java/com/winlator/star/XServerDisplayActivity.java
         grep -Fq '" | root=" + rootResult' app/src/main/java/com/winlator/star/XServerDisplayActivity.java
+        grep -Fq 'gothicTarget && !rootOptOut' app/src/main/java/com/winlator/star/XServerDisplayActivity.java
 
     - name: Set up JDK 17 (preinstalled toolchain, no apt)
       uses: actions/setup-java@v4
